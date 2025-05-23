@@ -18,12 +18,12 @@ exports.updateSelfUser = updateSelfUser;
 const Database_1 = __importDefault(require("../../schemas/Database"));
 function updateSelfLoginTime(userId, time) {
     return __awaiter(this, void 0, void 0, function* () {
-        yield Database_1.default.query(`update public.users_account set last_login = $1 where user_id = $2`, [time, userId]);
+        yield Database_1.default.query(`update public.users set last_login = $1 where user_id = $2`, [time, userId]);
     });
 }
 function updateSelfPassword(userId, password) {
     return __awaiter(this, void 0, void 0, function* () {
-        yield Database_1.default.query(`update public.users_credentials set password = $1 where user_id = $2`, [password, userId]);
+        yield Database_1.default.query(`update public.users set password = $1 where user_id = $2`, [password, userId]);
     });
 }
 function updateSelfUser(userId, options) {
