@@ -23,7 +23,6 @@ const UserQueries_1 = require("../sql/miscellaneous/UserQueries");
 const jsonwebtoken_1 = require("jsonwebtoken");
 const transport_1 = __importDefault(require("../mail/transport"));
 const dotenv_1 = require("dotenv");
-const constants_1 = require("../constants");
 const SelfQueries_1 = require("../sql/miscellaneous/SelfQueries");
 const ValidateRequest_1 = require("../tools/ValidateRequest");
 const SignID_1 = require("../tools/SignID");
@@ -36,17 +35,13 @@ function registerUser(request, response) {
             const [validRequest, missingParameters] = (0, ValidateRequest_1.validateBody)({ type: "USER", data });
             if (!validRequest)
                 return response.status(400).send({ message: `Missing parameters. These parameters are required: ${missingParameters.join(", ")}` });
-            if (!constants_1.PASSWORD_REGEX.test(data.password))
-                return response.status(422).send({
-                    message: `Password must only contain alpha-numeric characters and it's length must be between 4 and 32 characters.`
-                });
             //Implementar verificacion de correo existente
             const emailTaken = yield (0, UserQueries_1.isEmailAlreadyUsed)(data.email);
             if (emailTaken)
                 return response.status(409).send({ message: "This email is already used." });
             const hashedPassword = yield (0, bcrypt_1.hash)(data.password, 10);
             const user = {
-                account: { created_at: new Date(), last_login: new Date(), tfa: false, active: false },
+                account: { created_at: new Date(), last_login: new Date(), tfa: true, active: true },
                 credentials: { phone: data.phone, password: hashedPassword, email: data.email },
                 first_name: data.first_name,
                 last_name: data.last_name,
@@ -55,21 +50,30 @@ function registerUser(request, response) {
             };
             //Implementar registro de usuario en base de datos
             yield (0, UserQueries_1.createUser)(user);
-            //Generar token de sesion
-            const token = (0, session_1.generateSessionToken)({
-                id: user.id
-            });
             //Generar token de activacion
             const activationToken = (0, session_1.generateActivationToken)({ id: user.id });
             yield (0, UserQueries_1.setUserActivationToken)(user.id, activationToken);
+            //Generar codigo TFA
+            const code = yield (0, UserQueries_1.setUserTFA)(user.id);
             //Enviar el correo de confirmacion
             transport_1.default.sendMail({
                 to: user.credentials.email,
                 from: `"Sistema de Reservas USC" <${process.env.MAIL_USER}>`,
                 subject: "REGISTRO EXITOSO",
-                text: `Visita el siguiente enlace para activar la cuenta: ${(0, constants_1.GET_ACTIVATION_URL)(activationToken)}`
+                html: `<html>
+                <body>
+                    <div>
+                        <p>Hola, ${user.first_name} ${user.last_name}</p>
+                        <p>¡Ya casi estas listo! Solo introduce este codigo para verificar la autenticidad del correo.</p>
+                        <h2 style="text-align: center; background-image: initial; background-position: initial; background-size: initial; background-repeat: initial; background-attachment: initial; background-origin: initial; background-clip: initial; background-color: rgb(44, 53, 59) !important; padding: 10px; border-radius: 5px;"
+                            data-ogsb="rgb(225, 236, 244)">${code}</h2>
+                        <p>Este código es válido por <strong>5 minutos</strong>.</p>
+                        <p>Si no crees haber registrado el correo. Puede que alguien mas lo esté utilizando.</p>
+                    </div>
+                </body>
+            </html>`,
             }).catch(e => console.log(`[MAIL] Failed to send mail to ${user.credentials.email}: ${e.message}`));
-            response.status(200).send({ message: "User created.", token, activationToken });
+            response.status(202).send({ message: "User created. Check email for TFA code." });
         }
         catch (err) {
             response.status(500).send({ message: `User registration error. ${err.message}` });
@@ -94,7 +98,17 @@ function loginUser(request, response) {
                     to: user.credentials.email,
                     from: `"Sistema de Reservas USC" <${process.env.MAIL_USER}>`,
                     subject: "INICIO DE SESION",
-                    text: `Tu codigo de verificacion de dos pasos es: ${code}`
+                    html: `<html>
+                    <body>
+                        <div>
+                            <p>Hola, ${user.first_name} ${user.last_name}</p>
+                            <p>Recibimos una solicitud de intento de inicio de sesion. Por favor usa este codigo para confirmar que eres tu:</p>
+                            <h2 style="text-align: center; background-image: initial; background-position: initial; background-size: initial; background-repeat: initial; background-attachment: initial; background-origin: initial; background-clip: initial; background-color: rgb(44, 53, 59) !important; padding: 10px; border-radius: 5px;"
+                                data-ogsb="rgb(225, 236, 244)">${code}</h2>
+                            <p>Este código es válido por <strong>5 minutos</strong>.</p>
+                        </div>
+                    </body>
+                </html>`
                 }).catch(e => console.log(`[MAIL] Failed to send mail to ${user.credentials.email}: ${e.message}`));
                 response.status(202).send({ message: `User logged but requires TFA. Sent via email` });
             }
